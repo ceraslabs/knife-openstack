@@ -1,4 +1,3 @@
-
 # Author:: Seth Chisamore (<schisamo@opscode.com>)
 # Author:: Matt Ray (<matt@opscode.com>)
 # Copyright:: Copyright (c) 2011-2012 Opscode, Inc.
@@ -312,8 +311,6 @@ class Chef
 
         retry
       end
-
-      yield
     end
 
     def associate_address(server)
