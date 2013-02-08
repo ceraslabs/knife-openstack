@@ -3,7 +3,7 @@ $:.push File.expand_path("../lib", __FILE__)
 require "knife-openstack/version"
 
 Gem::Specification.new do |s|
-  s.name        = "knife-openstack"
+  s.name        = "customized-knife-openstack"
   s.version     = Knife::OpenStack::VERSION
   s.platform    = Gem::Platform::RUBY
   s.has_rdoc = true

@@ -1,4 +1,4 @@
-#
+
 # Author:: Seth Chisamore (<schisamo@opscode.com>)
 # Author:: Matt Ray (<matt@opscode.com>)
 # Copyright:: Copyright (c) 2011-2012 Opscode, Inc.
@@ -18,6 +18,7 @@
 #
 
 require 'chef/knife/openstack_base'
+require 'yaml'
 
 class Chef
   class Knife
@@ -210,17 +211,7 @@ class Chef
       msg_pair("Public IP Address", server.public_ip_address['addr']) if server.public_ip_address
 
       if config[:floating_ip]
-        associated = false
-        connection.addresses.each do |address|
-          if address.instance_id.nil?
-            server.associate_address(address.ip)
-            #a bit of a hack, but server.reload takes a long time
-            server.addresses['public'].push({"version"=>4,"addr"=>address.ip})
-            associated = true
-            msg_pair("Floating IP Address", address.ip)
-            break
-          end
-        end
+        associated = associate_address(server)
         unless associated
           ui.error("Unable to associate floating IP.")
           exit 1
@@ -248,7 +239,9 @@ class Chef
         puts("done")
       }
 
-      bootstrap_for_node(server, bootstrap_ip_address).run
+      retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Net::SSH::AuthenticationFailed]) do
+        bootstrap_for_node(server, bootstrap_ip_address).run
+      end
 
       puts "\n"
       msg_pair("Instance Name", server.name)
@@ -299,6 +292,106 @@ class Chef
       return chef_node_name unless chef_node_name.nil?
       #lazy uuids
       chef_node_name = "os-"+rand.to_s.split('.')[1]
+    end
+
+    def retryable(options = {}, &block)
+      retry_exceptions, timeout = options[:on], options[:timeout]
+      start = Time.now
+      failures = 0
+
+      begin
+        return yield
+      rescue *retry_exceptions
+        if Time.now - start > timeout
+          raise "Operation timeout"
+        end
+
+        Chef::Log.debug("Catch exception, retrying")
+        failures += 1
+        sleep (((2 ** failures) -1) * 0.1)
+
+        retry
+      end
+
+      yield
+    end
+
+    def associate_address(server)
+      ip = get_floating_ip
+      return false unless ip
+
+      server.associate_address(ip)
+      (server.addresses['public'] ||= Array.new).push({"version" => 4, "addr" => ip})
+      msg_pair("Floating IP Address", ip)
+      return true
+    end
+
+    module AddrState
+      UNASSOCIATED = "unassociated"
+      ASSOCIATING = "associating"
+      ASSOCIATED = "associated"
+    end
+
+    def get_floating_ip
+      lock_file = "/tmp/floating_ips.lock"
+      data_file = "/tmp/floating_ips.yaml"
+
+      File.open(lock_file, "w") do |lock|
+        lock.flock(File::LOCK_EX)
+
+        unless File.exists?(data_file)
+          File.open(data_file, "w") do |fout|
+            addrs = Array.new
+            connection.addresses.each do |address|
+              addrs << {:ip => address.ip, :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED, :last_updated => Time.now}
+            end
+            fout.write(addrs.to_yaml)
+          end
+        end
+
+        # pull floating ips' info from file
+        cached_addrs = YAML.load_file(data_file)
+        raise "Unexpected data format in file #{data_file}" unless cached_addrs.class == Array
+
+        # update the floating ips info
+        cached_addrs.each do |cached_addr|
+          connection.addresses.each do |address|
+            next if cached_addr[:ip] != address.ip
+            if address.instance_id && cached_addr[:state] == AddrState::ASSOCIATING
+              set_addr_state(cached_addr, AddrState::ASSOCIATED)
+            elsif associate_timeout(cached_addr)
+              set_addr_state(cached_addr, AddrState::UNASSOCIATED)
+            end
+          end
+        end
+
+        # choose a floating ip that haven't associated and associating with any instance
+        my_ip = nil
+        cached_addrs.each do |addr|
+          if addr[:state] == AddrState::UNASSOCIATED
+            my_ip = addr[:ip]
+            set_addr_state(addr, AddrState::ASSOCIATING)
+            break
+          end
+        end
+
+        # dump the floating ips' info back to file
+        File.open(data_file, "w") do |fout|
+          fout.write(cached_addrs.to_yaml)
+        end
+
+        my_ip
+      end
+    end
+
+    def set_addr_state(addr, state)
+      addr[:state] = state
+      addr[:last_updated] = Time.now
+    end
+
+    def associate_timeout(addr)
+      timeout = 120
+      addr[:state] == AddrState::ASSOCIATING && Time.now - addr[:last_updated] > timeout
     end
   end
 end
