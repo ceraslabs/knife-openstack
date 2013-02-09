@@ -179,11 +179,7 @@ class Chef
         :image_ref => locate_config_value(:image),
         :flavor_ref => locate_config_value(:flavor),
         # :security_group => locate_config_value(:security_groups),
-        :key_name => Chef::Config[:knife][:openstack_ssh_key_id],
-        :personality => [{
-            "path" => "/etc/chef/ohai/hints/openstack.json",
-            "contents" => ''
-          }]
+        :key_name => Chef::Config[:knife][:openstack_ssh_key_id]
       }
 
       Chef::Log.debug("Name #{node_name}")
@@ -269,6 +265,8 @@ class Chef
       bootstrap.config[:use_sudo] = true unless config[:ssh_user] == 'root'
       bootstrap.config[:template_file] = locate_config_value(:template_file)
       bootstrap.config[:environment] = config[:environment]
+      Chef::Config[:knife][:hints] ||= {}
+      Chef::Config[:knife][:hints]["openstack"] ||= {}
       bootstrap
     end
 
