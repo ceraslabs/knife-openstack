@@ -354,6 +354,8 @@ class Chef
             next if cached_addr[:ip] != address.ip
             if address.instance_id && cached_addr[:state] == AddrState::ASSOCIATING
               set_addr_state(cached_addr, AddrState::ASSOCIATED)
+            elsif address.instance_id.nil? && cached_addr[:state] == AddrState::ASSOCIATED
+              set_addr_state(cached_addr, AddrState::UNASSOCIATED)
             elsif associate_timeout(cached_addr)
               set_addr_state(cached_addr, AddrState::UNASSOCIATED)
             end
