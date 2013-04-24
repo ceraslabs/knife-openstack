@@ -57,6 +57,11 @@ class Chef
             :long => "--openstack-api-endpoint ENDPOINT",
             :description => "Your OpenStack API endpoint",
             :proc => Proc.new { |endpoint| Chef::Config[:knife][:openstack_auth_url] = endpoint }
+
+          option :region,
+            :long => "--region REGION",
+            :description => "Your OpenStack region",
+            :proc => Proc.new { |key| Chef::Config[:knife][:region] = key }
         end
       end
 
@@ -70,7 +75,8 @@ class Chef
             :openstack_username => Chef::Config[:knife][:openstack_username],
             :openstack_api_key => Chef::Config[:knife][:openstack_password],
             :openstack_auth_url => Chef::Config[:knife][:openstack_auth_url],
-            :openstack_tenant => Chef::Config[:knife][:openstack_tenant]
+            :openstack_tenant => Chef::Config[:knife][:openstack_tenant],
+            :openstack_region => Chef::Config[:knife][:region]
           )
         end
       end
