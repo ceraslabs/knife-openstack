@@ -230,7 +230,7 @@ class Chef
         #    floating_address = addresses[free_floating].ip
         #  end
         #end
-        associated = associate_address(server, :selected_ip => floating_address) #TODO
+        associated = associate_address(server, :selected_ip => floating_address)
         unless associated
           ui.error("Unable to assign a Floating IP from allocated IPs.")
           exit 1
@@ -376,8 +376,8 @@ class Chef
       end
     end
 
-    def associate_address(server)
-      ip = get_floating_ip
+    def associate_address(server, options={})
+      ip = get_floating_ip(options)
       return false unless ip
 
       server.associate_address(ip)
@@ -392,57 +392,101 @@ class Chef
       ASSOCIATED = "associated"
     end
 
-    def get_floating_ip
-      lock_file = "/tmp/floating_ips.lock"
-      data_file = "/tmp/floating_ips.yaml"
+    IPS_CACHED_FILE = "/tmp/floating_ips.yaml"
 
-      File.open(lock_file, "w") do |lock|
-        lock.flock(File::LOCK_EX)
-
-        unless File.exists?(data_file)
-          File.open(data_file, "w") do |fout|
-            addrs = Array.new
-            connection.addresses.each do |address|
-              addrs << {:ip => address.ip, :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED, :last_updated => Time.now}
-            end
-            fout.write(addrs.to_yaml)
-          end
-        end
-
-        # pull floating ips' info from file
-        cached_addrs = YAML.load_file(data_file)
-        raise "Unexpected data format in file #{data_file}" unless cached_addrs.class == Array
-
-        # update the floating ips info
-        cached_addrs.each do |cached_addr|
-          connection.addresses.each do |address|
-            next if cached_addr[:ip] != address.ip
-            if address.instance_id && cached_addr[:state] == AddrState::ASSOCIATING
-              set_addr_state(cached_addr, AddrState::ASSOCIATED)
-            elsif address.instance_id.nil? && cached_addr[:state] == AddrState::ASSOCIATED
-              set_addr_state(cached_addr, AddrState::UNASSOCIATED)
-            elsif associate_timeout(cached_addr)
-              set_addr_state(cached_addr, AddrState::UNASSOCIATED)
-            end
-          end
-        end
+    def get_floating_ip(options={})
+      lock_floating_ips do
+        cached_addrs = load_floating_ip
 
         # choose a floating ip that haven't associated and associating with any instance
-        my_ip = nil
+        free_ip = nil
+        selected_ip = options[:selected_ip]
         cached_addrs.each do |addr|
-          if addr[:state] == AddrState::UNASSOCIATED
-            my_ip = addr[:ip]
+          if addr[:state] == AddrState::UNASSOCIATED &&
+             (selected_ip.nil? || selected_ip == addr[:ip])
+            free_ip = addr[:ip]
             set_addr_state(addr, AddrState::ASSOCIATING)
             break
           end
         end
 
-        # dump the floating ips' info back to file
-        File.open(data_file, "w") do |fout|
-          fout.write(cached_addrs.to_yaml)
-        end
+        save_floating_ip(cached_addrs)
+        free_ip
+      end
+    end
 
-        my_ip
+    def lock_floating_ips
+      raise "Unexpected missing of block" unless block_given?
+
+      lock_file = "/tmp/floating_ips.lock"
+      File.open(lock_file, "w") do |lock|
+        lock.flock(File::LOCK_EX)
+        yield
+      end
+    end
+
+    def load_floating_ip
+      cached_addrs = load_floating_ip_from_file
+
+      # update the floating ips info
+      cached_addrs.each do |cached_addr|
+        connection.addresses.each do |address|
+          next if cached_addr[:ip] != address.ip
+          if address.instance_id && cached_addr[:state] == AddrState::ASSOCIATING
+            set_addr_state(cached_addr, AddrState::ASSOCIATED)
+          elsif address.instance_id.nil? && cached_addr[:state] == AddrState::ASSOCIATED
+            set_addr_state(cached_addr, AddrState::UNASSOCIATED)
+          elsif associate_timeout(cached_addr)
+            set_addr_state(cached_addr, AddrState::UNASSOCIATED)
+          end
+        end
+      end
+
+      cached_addrs
+    end
+
+    def load_floating_ip_from_file
+      unless File.exists?(IPS_CACHED_FILE)
+        File.open(IPS_CACHED_FILE, "w") do |fout|
+          addrs = Array.new
+          connection.addresses.each do |address|
+            addrs << {
+              :ip => address.ip,
+              :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED,
+              :last_updated => Time.now
+            }
+          end
+          fout.write(addrs.to_yaml)
+        end
+      end
+
+      # pull floating ips' info from file
+      cached_addrs = YAML.load_file(IPS_CACHED_FILE)
+      raise "Unexpected data format in file #{IPS_CACHED_FILE}" unless cached_addrs.class == Array
+
+      # add missing floating ips
+      connection.addresses.each do |address|
+        next if cached_addrs.any?{ |addr| addr[:ip] == address.ip }
+        cached_addrs << {
+          :ip => address.ip,
+          :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED,
+          :last_updated => Time.now
+        }
+      end
+
+      # delete unavailable floating ips
+      cached_addrs.each do |addr|
+        next if connection.addresses.any?{ |address| address.ip == addr[:ip] }
+        cached_addrs.delete(addr)
+      end
+
+      cached_addrs
+    end
+
+    def save_floating_ip(cached_addrs)
+      # dump the floating ips' info back to file
+      File.open(IPS_CACHED_FILE, "w") do |fout|
+        fout.write(cached_addrs.to_yaml)
       end
     end
 
