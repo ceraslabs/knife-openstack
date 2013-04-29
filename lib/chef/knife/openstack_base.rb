@@ -1,7 +1,7 @@
 #
 # Author:: Seth Chisamore (<schisamo@opscode.com>)
 # Author:: Matt Ray (<matt@opscode.com>)
-# Copyright:: Copyright (c) 2011-2012 Opscode, Inc.
+# Copyright:: Copyright (c) 2011-2013 Opscode, Inc.
 # License:: Apache License, Version 2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-require 'chef/knife'
+require 'fog'
 
 class Chef
   class Knife
@@ -30,9 +30,10 @@ class Chef
         includer.class_eval do
 
           deps do
-            require 'fog'
-            require 'readline'
             require 'chef/json_compat'
+            require 'chef/knife'
+            require 'readline'
+            Chef::Knife.load_deps
           end
 
           option :openstack_username,
@@ -62,6 +63,13 @@ class Chef
             :long => "--region REGION",
             :description => "Your OpenStack region",
             :proc => Proc.new { |key| Chef::Config[:knife][:region] = key }
+
+          option :openstack_insecure,
+            :long => "--insecure",
+            :description => "Ignore SSL certificate on the Auth URL",
+            :boolean => true,
+            :default => false,
+            :proc => Proc.new { |key| Chef::Config[:knife][:openstack_insecure] = key }
         end
       end
 
@@ -69,6 +77,8 @@ class Chef
         Chef::Log.debug("openstack_username #{Chef::Config[:knife][:openstack_username]}")
         Chef::Log.debug("openstack_auth_url #{Chef::Config[:knife][:openstack_auth_url]}")
         Chef::Log.debug("openstack_tenant #{Chef::Config[:knife][:openstack_tenant]}")
+        Chef::Log.debug("openstack_insecure #{Chef::Config[:knife][:openstack_insecure].to_s}")
+
         @connection ||= begin
           connection = Fog::Compute.new(
             :provider => 'OpenStack',
@@ -76,9 +86,18 @@ class Chef
             :openstack_api_key => Chef::Config[:knife][:openstack_password],
             :openstack_auth_url => Chef::Config[:knife][:openstack_auth_url],
             :openstack_tenant => Chef::Config[:knife][:openstack_tenant],
-            :openstack_region => Chef::Config[:knife][:region]
-          )
-        end
+            :openstack_region => Chef::Config[:knife][:region],
+            :connection_options => {
+              :ssl_verify_peer => !Chef::Config[:knife][:openstack_insecure]
+            }
+            )
+                        rescue Excon::Errors::Unauthorized => e
+                          ui.fatal("Connection failure, please check your OpenStack username and password.")
+                          exit 1
+                        rescue Excon::Errors::SocketError => e
+                          ui.fatal("Connection failure, please check your OpenStack authentication URL.")
+                          exit 1
+                        end
       end
 
       def locate_config_value(key)
@@ -104,6 +123,20 @@ class Chef
 
         if errors.each{|e| ui.error(e)}.any?
           exit 1
+        end
+      end
+
+      # http://tickets.opscode.com/browse/KNIFE-248
+      def primary_private_ip_address(addresses)
+        if addresses['private']
+          return addresses['private'].last['addr']
+        end
+      end
+
+      #we use last since the floating IP goes there
+      def primary_public_ip_address(addresses)
+        if addresses['public']
+          return addresses['public'].last['addr']
         end
       end
 
