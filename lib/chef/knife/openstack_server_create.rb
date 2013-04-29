@@ -219,17 +219,6 @@ class Chef
       floating_address = locate_config_value(:floating_ip)
       Chef::Log.debug("Floating IP Address requested #{floating_address}")
       unless (floating_address == '-1') #no floating IP requested
-        #addresses = connection.addresses
-        ##floating requested without value
-        #if floating_address.nil?
-        #  free_floating = addresses.find_index {|a| a.fixed_ip.nil?}
-        #  if free_floating.nil? #no free floating IP found
-        #    ui.error("Unable to assign a Floating IP from allocated IPs.")
-        #    exit 1
-        #  else
-        #    floating_address = addresses[free_floating].ip
-        #  end
-        #end
         associated = associate_address(server, :selected_ip => floating_address)
         unless associated
           ui.error("Unable to assign a Floating IP from allocated IPs.")
@@ -309,19 +298,11 @@ class Chef
 
     def is_floating_ip_valid
       address = locate_config_value(:floating_ip)
-      if address == '-1' #no floating IP requested
+      if address.nil? || address == '-1' #no floating IP requested
         return true
       end
       addresses = connection.addresses
       return false if addresses.empty? #no floating IPs
-      #floating requested without value
-      if address.nil?
-        if addresses.find_index {|a| a.fixed_ip.nil?}
-          return true
-        else
-          return false #no floating IPs available
-        end
-      end
       #floating requested with value
       if addresses.find_index {|a| a.ip == address}
         return true
@@ -407,6 +388,19 @@ class Chef
             free_ip = addr[:ip]
             set_addr_state(addr, AddrState::ASSOCIATING)
             break
+          end
+        end
+
+        # allocate a floating ip if none available
+        if free_ip.nil?
+          response = connection.allocate_address
+          free_ip = response.body["floating_ip"]["ip"] if response.body["floating_ip"]
+          if free_ip
+            cached_addrs << {
+              :ip => free_ip,
+              :state => AddrState::ASSOCIATING,
+              :last_updated => Time.now
+            }
           end
         end
 
