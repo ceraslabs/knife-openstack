@@ -43,6 +43,12 @@ class Chef
         :long => "--node-name NAME",
         :description => "The name of the node and client to delete, if it differs from the server name. Only has meaning when used with the '--purge' option."
 
+      option :deallocate_floating_ip,
+        :long => "--dealloc-floating-ip",
+        :boolean => true,
+        :default => false,
+        :description => "Deallocate the floating IP address if any."
+
       # Extracted from Chef::Knife.delete_object, because it has a
       # confirmation step built in... By specifying the '--purge'
       # flag (and also explicitly confirming the server destruction!)
@@ -87,6 +93,22 @@ class Chef
               destroy_item(Chef::ApiClient, thing_to_delete, "client")
             else
               ui.warn("Corresponding node and client for the #{instance_id} server were not deleted and remain registered with the Chef Server")
+            end
+
+            if config[:deallocate_floating_ip]
+              server_addrs = connection.addresses.select{ |a| a.instance_id.to_s == instance_id }
+              begin
+                server_addrs.each do |server_addr|
+                  floating_ip = network_service.floating_ips.find{ |fip| fip.ip == server_addr.ip }
+                  floating_ip.destroy if floating_ip
+                end
+              rescue Fog::Errors::NotFound
+                server_addrs.each do |server_addr|
+                  retryable(:on => [Excon::Errors::InternalServerError]) do
+                    server_addr.destroy
+                  end
+                end
+              end
             end
 
           rescue NoMethodError

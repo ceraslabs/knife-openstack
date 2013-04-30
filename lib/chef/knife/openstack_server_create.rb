@@ -67,6 +67,12 @@ class Chef
       :default => "-1",
       :description => "Request to associate a floating IP address to the new OpenStack node. Assumes IPs have been allocated to the project. Specific IP is optional."
 
+      option :allocate_floating_ip,
+      :long => "--auto-alloc-floating-ip",
+      :boolean => true,
+      :default => false,
+      :description => "Allocate a floating IP address if a floating IP is requested and none of allocated floating IPs is available."
+
       option :private_network,
       :long => "--private-network",
       :description => "Use the private IP for bootstrapping rather than the public IP",
@@ -337,161 +343,51 @@ class Chef
       chef_node_name = "os-"+rand.to_s.split('.')[1]
     end
 
-    def retryable(options = {}, &block)
-      retry_exceptions, timeout = options[:on], options[:timeout]
-      start = Time.now
-      failures = 0
-
-      begin
-        return yield
-      rescue *retry_exceptions
-        if Time.now - start > timeout
-          raise "Operation timeout"
-        end
-
-        Chef::Log.debug("Catch exception, retrying")
-        failures += 1
-        sleep (((2 ** failures) -1) * 0.1)
-
-        retry
-      end
-    end
-
     def associate_address(server, options={})
-      ip = get_floating_ip(options)
-      return false unless ip
+      free_floating_ip = nil
 
-      server.associate_address(ip)
-      (server.addresses['public'] ||= Array.new).push({"version" => 4, "addr" => ip})
-      msg_pair("Floating IP Address", ip)
-      return true
-    end
-
-    module AddrState
-      UNASSOCIATED = "unassociated"
-      ASSOCIATING = "associating"
-      ASSOCIATED = "associated"
-    end
-
-    IPS_CACHED_FILE = "/tmp/floating_ips.yaml"
-
-    def get_floating_ip(options={})
       lock_floating_ips do
-        cached_addrs = load_floating_ip
+        begin
+          free_floating_ip = network_service.floating_ips.find{ |ip| ip.port_id.nil? }
+          if free_floating_ip.nil? && locate_config_value(:allocate_floating_ip)
+            tenant = connection.tenants.find{ |t| t.name == Chef::Config[:knife][:openstack_tenant] }
+            ext_net = network_service.networks.find{ |net| net.router_external }
+            free_floating_ip = network_service.floating_ips.create(:floating_network_id => ext_net.id,
+                                                                   :tenant_id => tenant.id)
+          end
 
-        # choose a floating ip that haven't associated and associating with any instance
-        free_ip = nil
-        selected_ip = options[:selected_ip]
-        cached_addrs.each do |addr|
-          if addr[:state] == AddrState::UNASSOCIATED &&
-             (selected_ip.nil? || selected_ip == addr[:ip])
-            free_ip = addr[:ip]
-            set_addr_state(addr, AddrState::ASSOCIATING)
-            break
+          server_fixed_ip = primary_private_ip_address(server.addresses)
+          port = network_service.ports.find{ |p| p.fixed_ips.include?(server_fixed_ip) }
+          raise "Unexpected missing of port for server" unless port
+          network_service.associate_floating_ip(free_floating_ip.id, port.id)
+        rescue Fog::Errors::NotFound
+          free_floating_ip = connection.addresses.find{ |addr| addr.fixed_ip.nil? }
+          if free_floating_ip.nil? && locate_config_value(:allocate_floating_ip)
+            free_floating_ip = connection.addresses.create
+          end
+
+          if free_floating_ip
+            server.associate_address(free_floating_ip.ip)
           end
         end
-
-        # allocate a floating ip if none available
-        if free_ip.nil?
-          response = connection.allocate_address
-          free_ip = response.body["floating_ip"]["ip"] if response.body["floating_ip"]
-          if free_ip
-            cached_addrs << {
-              :ip => free_ip,
-              :state => AddrState::ASSOCIATING,
-              :last_updated => Time.now
-            }
-          end
-        end
-
-        save_floating_ip(cached_addrs)
-        free_ip
       end
+
+      return false if free_floating_ip.nil?
+
+      (server.addresses['public'] ||= Array.new).push({"version" => 4, "addr" => free_floating_ip.ip})
+      msg_pair("Floating IP Address", free_floating_ip.ip)
+      true
     end
+
+    FLOATING_IPS_LOCK_FILE = "/tmp/floating_ips.lock"
 
     def lock_floating_ips
       raise "Unexpected missing of block" unless block_given?
 
-      lock_file = "/tmp/floating_ips.lock"
-      File.open(lock_file, "w") do |lock|
+      File.open(FLOATING_IPS_LOCK_FILE, "w") do |lock|
         lock.flock(File::LOCK_EX)
         yield
       end
-    end
-
-    def load_floating_ip
-      cached_addrs = load_floating_ip_from_file
-
-      # update the floating ips info
-      cached_addrs.each do |cached_addr|
-        connection.addresses.each do |address|
-          next if cached_addr[:ip] != address.ip
-          if address.instance_id && cached_addr[:state] == AddrState::ASSOCIATING
-            set_addr_state(cached_addr, AddrState::ASSOCIATED)
-          elsif address.instance_id.nil? && cached_addr[:state] == AddrState::ASSOCIATED
-            set_addr_state(cached_addr, AddrState::UNASSOCIATED)
-          elsif associate_timeout(cached_addr)
-            set_addr_state(cached_addr, AddrState::UNASSOCIATED)
-          end
-        end
-      end
-
-      cached_addrs
-    end
-
-    def load_floating_ip_from_file
-      unless File.exists?(IPS_CACHED_FILE)
-        File.open(IPS_CACHED_FILE, "w") do |fout|
-          addrs = Array.new
-          connection.addresses.each do |address|
-            addrs << {
-              :ip => address.ip,
-              :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED,
-              :last_updated => Time.now
-            }
-          end
-          fout.write(addrs.to_yaml)
-        end
-      end
-
-      # pull floating ips' info from file
-      cached_addrs = YAML.load_file(IPS_CACHED_FILE)
-      raise "Unexpected data format in file #{IPS_CACHED_FILE}" unless cached_addrs.class == Array
-
-      # add missing floating ips
-      connection.addresses.each do |address|
-        next if cached_addrs.any?{ |addr| addr[:ip] == address.ip }
-        cached_addrs << {
-          :ip => address.ip,
-          :state => address.instance_id ? AddrState::ASSOCIATED : AddrState::UNASSOCIATED,
-          :last_updated => Time.now
-        }
-      end
-
-      # delete unavailable floating ips
-      cached_addrs.each do |addr|
-        next if connection.addresses.any?{ |address| address.ip == addr[:ip] }
-        cached_addrs.delete(addr)
-      end
-
-      cached_addrs
-    end
-
-    def save_floating_ip(cached_addrs)
-      # dump the floating ips' info back to file
-      File.open(IPS_CACHED_FILE, "w") do |fout|
-        fout.write(cached_addrs.to_yaml)
-      end
-    end
-
-    def set_addr_state(addr, state)
-      addr[:state] = state
-      addr[:last_updated] = Time.now
-    end
-
-    def associate_timeout(addr)
-      timeout = 120
-      addr[:state] == AddrState::ASSOCIATING && Time.now - addr[:last_updated] > timeout
     end
   end
 end
