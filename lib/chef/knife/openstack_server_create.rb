@@ -256,8 +256,22 @@ class Chef
         puts("done")
       }
 
-      retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Net::SSH::AuthenticationFailed]) do
-        bootstrap_for_node(server, bootstrap_ip_address).run
+      bootstrap_retried = false
+      begin
+        retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Net::SSH::AuthenticationFailed]) do
+          bootstrap_for_node(server, bootstrap_ip_address).run
+        end
+      rescue Net::SSH::Disconnect => e
+        raise e if bootstrap_retried
+
+        puts "Bootstrap failed, about to reboot server and try again."
+
+        server.reboot
+        print "\n#{ui.color("Waiting for server reboot", :magenta)}"
+        server.wait_for { print "."; ready? }
+
+        bootstrap_retried = true
+        retry
       end
 
       puts "\n"
@@ -361,9 +375,10 @@ class Chef
           raise "Unexpected missing of port for server" unless port
           network_service.associate_floating_ip(free_floating_ip.id, port.id)
         rescue Fog::Errors::NotFound
-          free_floating_ip = connection.addresses.find{ |addr| addr.fixed_ip.nil? }
+          addresses = connection.addresses
+          free_floating_ip = addresses.find{ |addr| addr.fixed_ip.nil? }
           if free_floating_ip.nil? && locate_config_value(:allocate_floating_ip)
-            free_floating_ip = connection.addresses.create
+            free_floating_ip = addresses.create
           end
 
           if free_floating_ip
