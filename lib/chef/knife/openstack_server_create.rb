@@ -249,15 +249,14 @@ class Chef
         exit 1
       end
 
-      print "\n#{ui.color("Waiting for sshd", :magenta)}"
-
-      print(".") until tcp_test_ssh(bootstrap_ip_address) {
-        sleep @initial_sleep_delay ||= 10
-        puts("done")
-      }
-
       bootstrap_retried = false
       begin
+        print "\n#{ui.color("Waiting for sshd", :magenta)}"
+        print(".") until tcp_test_ssh(bootstrap_ip_address) {
+          sleep @initial_sleep_delay ||= 10
+          puts("done")
+        }
+
         retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Net::SSH::AuthenticationFailed]) do
           bootstrap_for_node(server, bootstrap_ip_address).run
         end
