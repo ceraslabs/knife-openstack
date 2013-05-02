@@ -361,35 +361,37 @@ class Chef
 
       lock_floating_ips do
         begin
-          free_floating_ip = network_service.floating_ips.find{ |ip| ip.port_id.nil? }
-          if free_floating_ip.nil? && locate_config_value(:allocate_floating_ip)
+          floating_ip = network_service.floating_ips.find{ |ip| ip.port_id.nil? }
+          if floating_ip.nil? && locate_config_value(:allocate_floating_ip)
             tenant = connection.tenants.find{ |t| t.name == Chef::Config[:knife][:openstack_tenant] }
             ext_net = network_service.networks.find{ |net| net.router_external }
-            free_floating_ip = network_service.floating_ips.create(:floating_network_id => ext_net.id,
-                                                                   :tenant_id => tenant.id)
+            floating_ip = network_service.floating_ips.create(:floating_network_id => ext_net.id,
+                                                              :tenant_id => tenant.id)
           end
 
-          server_fixed_ip = primary_private_ip_address(server.addresses)
-          port = network_service.ports.find{ |p| p.fixed_ips.include?(server_fixed_ip) }
+          server_fixed_ip = server.networks.map{ |n| n.addresses.last }.last
+          port = network_service.ports.find{ |p| p.fixed_ips.any?{ |fip| fip["ip_address"] == server_fixed_ip} }
           raise "Unexpected missing of port for server" unless port
-          network_service.associate_floating_ip(free_floating_ip.id, port.id)
+          network_service.associate_floating_ip(floating_ip.id, port.id)
+          free_floating_ip = floating_ip.floating_ip_address
         rescue Fog::Errors::NotFound
           addresses = connection.addresses
-          free_floating_ip = addresses.find{ |addr| addr.fixed_ip.nil? }
-          if free_floating_ip.nil? && locate_config_value(:allocate_floating_ip)
-            free_floating_ip = addresses.create
+          address = addresses.find{ |addr| addr.fixed_ip.nil? }
+          if address.nil? && locate_config_value(:allocate_floating_ip)
+            address = addresses.create
           end
 
-          if free_floating_ip
-            server.associate_address(free_floating_ip.ip)
+          if address
+            server.associate_address(address.ip)
+            free_floating_ip = address.ip
           end
         end
       end
 
       return false if free_floating_ip.nil?
 
-      (server.addresses['public'] ||= Array.new).push({"version" => 4, "addr" => free_floating_ip.ip})
-      msg_pair("Floating IP Address", free_floating_ip.ip)
+      (server.addresses['public'] ||= Array.new).push({"version" => 4, "addr" => free_floating_ip})
+      msg_pair("Floating IP Address", free_floating_ip)
       true
     end
 
