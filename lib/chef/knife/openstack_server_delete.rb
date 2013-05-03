@@ -83,6 +83,19 @@ class Chef
             puts "\n"
             confirm("Do you really want to delete this server")
 
+            if config[:deallocate_floating_ip]
+              private_ips = server.private_ip_addresses
+              public_ips = Array.new
+              begin
+                private_ips.each do |pip|
+                  floating_ip = network_service.floating_ips.find{ |fip| fip.fixed_ip_address == pip }
+                  public_ips << floating_ip.floating_ip_address if floating_ip
+                end
+              rescue Fog::Errors::NotFound
+                public_ips = server.public_ip_addresses
+              end
+            end
+
             server.destroy
 
             ui.warn("Deleted server #{server.id}")
@@ -96,16 +109,16 @@ class Chef
             end
 
             if config[:deallocate_floating_ip]
-              server_addrs = connection.addresses.select{ |a| a.instance_id.to_s == instance_id }
               begin
-                server_addrs.each do |server_addr|
-                  floating_ip = network_service.floating_ips.find{ |fip| fip.ip == server_addr.ip }
+                public_ips.each do |pip|
+                  floating_ip = network_service.floating_ips.find{ |fip| fip.floating_ip_address == pip }
                   floating_ip.destroy if floating_ip
                 end
               rescue Fog::Errors::NotFound
-                server_addrs.each do |server_addr|
+                public_ips.each do |pip|
+                  address = connection.addresses.find{ |addr| addr.ip == pip }
                   retryable(:on => [Excon::Errors::InternalServerError]) do
-                    server_addr.destroy
+                    address.destroy if address
                   end
                 end
               end
