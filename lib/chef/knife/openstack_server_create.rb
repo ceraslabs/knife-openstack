@@ -220,7 +220,7 @@ class Chef
       msg_pair("SSH Keypair", server.key_name) if server.key_name
       msg_pair("SSH Password", server.password) if (server.password && !server.key_name)
       Chef::Log.debug("Addresses #{server.addresses}")
-      msg_pair("Public IP Address", primary_public_ip_address(server.addresses)) if primary_public_ip_address(server.addresses)
+      msg_pair("Public IP Address", primary_public_ip_address(server)) if primary_public_ip_address(server)
 
       floating_address = locate_config_value(:floating_ip)
       Chef::Log.debug("Floating IP Address requested #{floating_address}")
@@ -233,14 +233,14 @@ class Chef
       end
 
       Chef::Log.debug("Addresses #{server.addresses}")
-      Chef::Log.debug("Public IP Address actual: #{primary_public_ip_address(server.addresses)}") if primary_public_ip_address(server.addresses)
+      Chef::Log.debug("Public IP Address actual: #{primary_public_ip_address(server)}") if primary_public_ip_address(server)
 
-      msg_pair("Private IP Address", primary_private_ip_address(server.addresses)) if primary_private_ip_address(server.addresses)
+      msg_pair("Private IP Address", primary_private_ip_address(server)) if primary_private_ip_address(server)
 
       #which IP address to bootstrap
-      bootstrap_ip_address = primary_public_ip_address(server.addresses) if primary_public_ip_address(server.addresses)
+      bootstrap_ip_address = primary_public_ip_address(server) if primary_public_ip_address(server)
       if config[:private_network]
-        bootstrap_ip_address = primary_private_ip_address(server.addresses)
+        bootstrap_ip_address = primary_private_ip_address(server)
       end
 
       Chef::Log.debug("Bootstrap IP Address: #{bootstrap_ip_address}")
@@ -280,8 +280,8 @@ class Chef
       msg_pair("Image", server.image['id'])
       msg_pair("SSH Keypair", server.key_name) if server.key_name
       msg_pair("SSH Password", server.password) if (server.password && !server.key_name)
-      msg_pair("Public IP Address", primary_public_ip_address(server.addresses)) if primary_public_ip_address(server.addresses)
-      msg_pair("Private IP Address", primary_private_ip_address(server.addresses)) if primary_private_ip_address(server.addresses)
+      msg_pair("Public IP Address", primary_public_ip_address(server)) if primary_public_ip_address(server)
+      msg_pair("Private IP Address", primary_private_ip_address(server)) if primary_private_ip_address(server)
       msg_pair("Environment", config[:environment] || '_default')
       msg_pair("Run List", config[:run_list].join(', '))
     end

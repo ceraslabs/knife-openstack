@@ -150,16 +150,20 @@ class Chef
       end
 
       # http://tickets.opscode.com/browse/KNIFE-248
-      def primary_private_ip_address(addresses)
-        if addresses['private']
-          return addresses['private'].last['addr']
+      def primary_private_ip_address(server)
+        if server.addresses['private']
+          return server.addresses['private'].last['addr']
+        elsif server.private_ip_addresses
+          return server.private_ip_addresses.last
         end
       end
 
       #we use last since the floating IP goes there
-      def primary_public_ip_address(addresses)
-        if addresses['public']
-          return addresses['public'].last['addr']
+      def primary_public_ip_address(server)
+        if server.addresses['public']
+          return server.addresses['public'].last['addr']
+        elsif server.public_ip_addresses
+          return server.public_ip_addresses.last
         end
       end
 

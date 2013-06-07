@@ -47,13 +47,13 @@ class Chef
           connection.servers.all.sort_by(&:id).each do |server|
             server_list << server.id.to_s
             server_list << server.name
-            if primary_public_ip_address(server.addresses)
-              server_list << primary_public_ip_address(server.addresses)
+            if primary_public_ip_address(server)
+              server_list << primary_public_ip_address(server)
             else
               server_list << ''
             end
-            if primary_private_ip_address(server.addresses)
-              server_list << primary_private_ip_address(server.addresses)
+            if primary_private_ip_address(server)
+              server_list << primary_private_ip_address(server)
             else
               server_list << ''
             end
