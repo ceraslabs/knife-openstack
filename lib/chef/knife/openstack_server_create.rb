@@ -257,7 +257,7 @@ class Chef
           puts("done")
         }
 
-        retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Net::SSH::AuthenticationFailed]) do
+        retryable(:timeout => 120, :on => [Errno::ECONNREFUSED, Errno::EHOSTUNREACH, Net::SSH::AuthenticationFailed]) do
           bootstrap_for_node(server, bootstrap_ip_address).run
         end
       rescue Net::SSH::Disconnect => e
