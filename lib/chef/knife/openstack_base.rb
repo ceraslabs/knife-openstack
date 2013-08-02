@@ -89,7 +89,9 @@ class Chef
             :openstack_region => Chef::Config[:knife][:region],
             :connection_options => {
               :ssl_verify_peer => !Chef::Config[:knife][:openstack_insecure],
-              :read_timeout => 300
+              :read_timeout => 300,
+              :debug_request => true,
+              :debug_response => true
             }
             )
                         rescue Excon::Errors::Unauthorized => e
@@ -111,7 +113,9 @@ class Chef
             :openstack_tenant => Chef::Config[:knife][:openstack_tenant],
             :openstack_region => Chef::Config[:knife][:region],
             :connection_options => {
-              :ssl_verify_peer => !Chef::Config[:knife][:openstack_insecure]
+              :ssl_verify_peer => !Chef::Config[:knife][:openstack_insecure],
+              :debug_request => true,
+              :debug_response => true
             }
           )
         rescue Excon::Errors::Unauthorized => e

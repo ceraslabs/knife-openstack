@@ -284,6 +284,9 @@ class Chef
       msg_pair("Private IP Address", primary_private_ip_address(server)) if primary_private_ip_address(server)
       msg_pair("Environment", config[:environment] || '_default')
       msg_pair("Run List", config[:run_list].join(', '))
+    rescue Fog::Errors::Error => e
+      raise e, e.verbose, e.backtrace if e.verbose
+      raise e
     end
 
     def bootstrap_for_node(server, bootstrap_ip_address)
