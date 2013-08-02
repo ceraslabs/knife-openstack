@@ -136,6 +136,17 @@ class Chef
       :boolean => true,
       :default => true
 
+      option :system_file_path,
+      :long => "--system-file-path PATH",
+      :description => "Full path to location of file to be injected into instance",
+      :proc => Proc.new { |i| Chef::Config[:knife][:system_file_path] = i }
+
+      option :system_file_content,
+      :long => "--system-file-content CONTENT",
+      :description => "The content of the system file",
+      :proc => Proc.new { |i| Chef::Config[:knife][:system_file_content] = i },
+      :default => ''
+
       def tcp_test_ssh(hostname)
         tcp_socket = TCPSocket.new(hostname, 22)
         readable = IO.select([tcp_socket], nil, nil, 5)
@@ -178,6 +189,12 @@ class Chef
         :security_groups => locate_config_value(:security_groups),
         :key_name => locate_config_value(:openstack_ssh_key_id)
       }
+      if locate_config_value(:system_file_path)
+        server_def[:personality] = [{
+          "path" => locate_config_value(:system_file_path),
+          "contents" => locate_config_value(:system_file_content)
+        }]
+      end
 
       Chef::Log.debug("Name #{node_name}")
       Chef::Log.debug("Image #{locate_config_value(:image)}")
