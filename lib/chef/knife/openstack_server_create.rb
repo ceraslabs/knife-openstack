@@ -202,7 +202,7 @@ class Chef
         }]
       end
       if locate_config_value(:openstack_hints)
-        server_def['os:scheduler_hints'] = parse_hints(locate_config_value(:openstack_hints))
+        server_def['os_scheduler_hints'] = parse_hints(locate_config_value(:openstack_hints))
       end
 
       Chef::Log.debug("Name #{node_name}")
