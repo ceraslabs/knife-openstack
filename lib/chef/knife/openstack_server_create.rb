@@ -147,6 +147,12 @@ class Chef
       :proc => Proc.new { |i| Chef::Config[:knife][:system_file_content] = i },
       :default => ''
 
+      option :openstack_hints,
+      :long => "--openstack-hints HINTS",
+      :description => "The openstack OS schedule hints",
+      :proc => Proc.new { |i| Chef::Config[:knife][:openstack_hints] = i },
+      :default => false
+
       def tcp_test_ssh(hostname)
         tcp_socket = TCPSocket.new(hostname, 22)
         readable = IO.select([tcp_socket], nil, nil, 5)
@@ -194,6 +200,9 @@ class Chef
           "path" => locate_config_value(:system_file_path),
           "contents" => locate_config_value(:system_file_content)
         }]
+      end
+      if locate_config_value(:openstack_hints)
+        server_def['os:scheduler_hints'] = parse_hints(locate_config_value(:openstack_hints))
       end
 
       Chef::Log.debug("Name #{node_name}")
@@ -424,6 +433,15 @@ class Chef
         lock.flock(File::LOCK_EX)
         yield
       end
+    end
+
+    def parse_hints(str)
+      hints = Hash.new
+      str.split(",").each do |hint|
+        key, value = *hint.split("=")
+        hints[key] = value
+      end
+      hints
     end
   end
 end
