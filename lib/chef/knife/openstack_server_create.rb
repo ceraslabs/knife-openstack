@@ -176,6 +176,9 @@ class Chef
       rescue Errno::ENETUNREACH
         sleep 2
         false
+      rescue Errno::EINVAL
+        sleep 2
+        false
       ensure
         tcp_socket && tcp_socket.close
       end
