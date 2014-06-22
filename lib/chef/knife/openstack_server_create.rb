@@ -196,7 +196,8 @@ class Chef
         :image_ref => locate_config_value(:image),
         :flavor_ref => locate_config_value(:flavor),
         :security_groups => locate_config_value(:security_groups),
-        :key_name => locate_config_value(:openstack_ssh_key_id)
+        :key_name => locate_config_value(:openstack_ssh_key_id),
+        :nics => networks.map{ |net| {net_id: net.id} }
       }
       if locate_config_value(:system_file_path)
         server_def[:personality] = [{
@@ -267,9 +268,10 @@ class Chef
       msg_pair("Private IP Address", primary_private_ip_address(server)) if primary_private_ip_address(server)
 
       #which IP address to bootstrap
-      bootstrap_ip_address = primary_public_ip_address(server) if primary_public_ip_address(server)
-      if config[:private_network]
+      if locate_config_value(:private_network)
         bootstrap_ip_address = primary_private_ip_address(server)
+      else
+        bootstrap_ip_address = primary_public_ip_address(server) || primary_private_ip_address(server)
       end
 
       Chef::Log.debug("Bootstrap IP Address: #{bootstrap_ip_address}")
@@ -345,6 +347,10 @@ class Chef
 
     def image
       @image ||= connection.images.get(locate_config_value(:image))
+    end
+
+    def networks
+      @networks ||= network_service.networks.select{ |net| !net.router_external }
     end
 
     def is_floating_ip_valid
